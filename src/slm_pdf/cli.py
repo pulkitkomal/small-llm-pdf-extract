@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import sys
 
 from slm_pdf.pipeline import Pipeline
@@ -37,11 +38,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=300,
         help="Render DPI (default: 300)",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable debug-level logging",
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Write logs to a file instead of stderr",
+        default=None,
+    )
     return parser.parse_args(argv)
+
+
+def _setup_logging(verbose: bool, log_file: str | None) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    if log_file:
+        logging.basicConfig(filename=log_file, level=level, format=fmt)
+    else:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter(fmt))
+        logging.basicConfig(level=level, handlers=[handler])
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    _setup_logging(args.verbose, args.log_file)
 
     pipeline = Pipeline(
         model=args.model,

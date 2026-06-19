@@ -1,10 +1,13 @@
 import base64
 import json
+import logging
 import re
+import time
 from typing import Optional
 
 import httpx
 
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a PDF document analyzer. Extract all content from the page image and return it as JSON.
 
@@ -42,6 +45,7 @@ class VlmClient:
         self.model = model
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
+        logger.info("VlmClient: model=%s endpoint=%s timeout=%ds", model, endpoint, timeout)
 
     def process_page(
         self, png_bytes: bytes, page_number: int, retry: bool = True
@@ -61,7 +65,11 @@ class VlmClient:
             "options": {"temperature": 0.1},
         }
 
+        img_size = len(png_bytes) >> 10
+        logger.info("Page %d: sending %dKB image to %s", page_number, img_size, self.model)
+
         try:
+            t0 = time.time()
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(
                     f"{self.endpoint}/api/chat", json=payload
@@ -69,7 +77,10 @@ class VlmClient:
                 resp.raise_for_status()
                 data = resp.json()
                 content = data.get("message", {}).get("content", "")
+            elapsed = time.time() - t0
+            logger.info("Page %d: Ollama responded in %.1fs (%d chars)", page_number, elapsed, len(content))
         except Exception as e:
+            logger.error("Page %d: Ollama request failed: %s", page_number, e)
             return {
                 "page_number": page_number,
                 "error": str(e),
@@ -81,14 +92,17 @@ class VlmClient:
 
         parsed = self._parse_json(content)
         if parsed is not None:
+            logger.info("Page %d: JSON parsed successfully", page_number)
             return parsed.get("pages", [{}])[0] if parsed.get("pages") else parsed
 
+        logger.warning("Page %d: failed to parse JSON from model output, retrying...", page_number)
         if retry:
             return self._retry_simple(png_bytes, page_number)
 
         return self._fallback(content, page_number)
 
     def _retry_simple(self, png_bytes: bytes, page_number: int) -> dict:
+        logger.info("Page %d: retrying with simplified prompt", page_number)
         b64_image = base64.b64encode(png_bytes).decode("utf-8")
         payload = {
             "model": self.model,
@@ -103,6 +117,7 @@ class VlmClient:
             "options": {"temperature": 0.1},
         }
         try:
+            t0 = time.time()
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(
                     f"{self.endpoint}/api/chat", json=payload
@@ -110,12 +125,17 @@ class VlmClient:
                 resp.raise_for_status()
                 data = resp.json()
                 content = data.get("message", {}).get("content", "")
-        except Exception:
+            elapsed = time.time() - t0
+            logger.info("Page %d: retry responded in %.1fs", page_number, elapsed)
+        except Exception as e:
+            logger.error("Page %d: retry also failed: %s", page_number, e)
             return self._fallback("", page_number)
 
         parsed = self._parse_json(content)
         if parsed is not None:
+            logger.info("Page %d: retry JSON parsed successfully", page_number)
             return parsed.get("pages", [{}])[0] if parsed.get("pages") else parsed
+        logger.warning("Page %d: retry also produced unparseable output", page_number)
         return self._fallback(content, page_number)
 
     def _parse_json(self, text: str) -> Optional[dict]:
@@ -138,6 +158,7 @@ class VlmClient:
         return None
 
     def _fallback(self, content: str, page_number: int) -> dict:
+        logger.warning("Page %d: storing raw text as fallback", page_number)
         return {
             "page_number": page_number,
             "sections": [],
