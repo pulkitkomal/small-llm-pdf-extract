@@ -1,0 +1,65 @@
+import argparse
+import json
+import sys
+
+from slm_pdf.pipeline import Pipeline
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="SLM-PDF: Extract structured data from PDFs using a vision-language model"
+    )
+    parser.add_argument("path", help="Path to the PDF file")
+    parser.add_argument(
+        "--output", "-o",
+        help="Output JSON file path (default: stdout)",
+        default=None,
+    )
+    parser.add_argument(
+        "--model",
+        default="qwen2.5-vl:3b",
+        help="Ollama model name (default: qwen2.5-vl:3b)",
+    )
+    parser.add_argument(
+        "--endpoint",
+        default="http://localhost:11434",
+        help="Ollama API endpoint (default: http://localhost:11434)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Timeout in seconds per page (default: 120)",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Render DPI (default: 300)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+
+    pipeline = Pipeline(
+        model=args.model,
+        endpoint=args.endpoint,
+        timeout=args.timeout,
+        dpi=args.dpi,
+    )
+    result = pipeline.run(args.path)
+    output = result.model_dump()
+
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(output, f, indent=2)
+        print(f"Output written to {args.output}", file=sys.stderr)
+    else:
+        sys.stdout.write(json.dumps(output, indent=2))
+        sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()
