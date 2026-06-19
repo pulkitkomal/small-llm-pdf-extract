@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slm-pdf"
+version = "0.1.0"
+description = "Small language model PDF parser for Raspberry Pi 5"
+requires-python = ">=3.11"
+dependencies = [
+    "PyMuPDF>=1.24.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+    "Pillow>=10.0",
+]
+
+[project.scripts]
+slm-pdf = "slm_pdf.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
